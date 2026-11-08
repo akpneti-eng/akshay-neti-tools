@@ -1,0 +1,145 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Akshay Neti Tools - Video to MP3</title>
+<script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js"></script>
+<style>
+*{box-sizing:border-box}
+body{margin:0;padding:20px;background:#071225;color:#fff;font-family:Arial,sans-serif}
+.container{max-width:720px;margin:35px auto;padding:25px;background:#10213b;border:1px solid #294568;border-radius:18px}
+h1{color:#55d9e8}
+p{color:#c3d2e6;line-height:1.6}
+input{width:100%;padding:14px;background:#fff;color:#111;border-radius:9px;margin:15px 0}
+button{padding:13px 20px;border:0;border-radius:9px;background:#654cff;color:white;font-weight:bold;cursor:pointer}
+button:disabled{opacity:.5;cursor:not-allowed}
+#status{margin:18px 0;color:#7ce5d9;overflow-wrap:anywhere}
+progress{width:100%;height:14px}
+#download{display:none;margin-top:18px;color:#7ce5d9;font-weight:bold}
+small{color:#9eb0c9}
+</style>
+</head>
+<body>
+<div class="container">
+<h1>🎵 Video to MP3 Converter</h1>
+<p>Choose a video, convert its audio to MP3 and download the result.</p>
+
+<input type="file" id="videoFile" accept="video/*">
+
+<button id="convertBtn" disabled>Convert to MP3</button>
+<p id="status">पहले अपनी वीडियो फाइल चुनें।</p>
+<progress id="progress" value="0" max="100"></progress>
+
+<a id="download" download="akshay-neti-audio.mp3">⬇ Download MP3</a>
+
+<p><small>वीडियो आपके ब्राउज़र में प्रोसेस होता है। बड़ी फाइलों में समय और अधिक मेमोरी लग सकती है। पहली बार Converter Engine डाउनलोड होगा।</small></p>
+</div>
+
+<script>
+(function(){
+  const fileInput=document.getElementById('videoFile');
+  const convertBtn=document.getElementById('convertBtn');
+  const status=document.getElementById('status');
+  const progress=document.getElementById('progress');
+  const download=document.getElementById('download');
+
+  let ffmpeg=null;
+  let selectedFile=null;
+  let outputURL=null;
+
+  const coreBase='https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd';
+
+  fileInput.addEventListener('change',()=>{
+    selectedFile=fileInput.files[0]||null;
+    convertBtn.disabled=!selectedFile;
+    download.style.display='none';
+    if(outputURL){URL.revokeObjectURL(outputURL);outputURL=null;}
+    status.textContent=selectedFile
+      ? 'Selected: '+selectedFile.name
+      : 'पहले अपनी वीडियो फाइल चुनें।';
+    progress.value=0;
+  });
+
+  async function loadEngine(){
+    if(ffmpeg) return;
+    status.textContent='Converter Engine डाउनलोड हो रहा है... कृपया प्रतीक्षा करें।';
+
+    const {FFmpeg}=FFmpegWASM;
+    ffmpeg=new FFmpeg();
+
+    ffmpeg.on('progress',({progress:p})=>{
+      progress.value=Math.max(0,Math.min(100,Math.round(p*100)));
+      status.textContent='Converting... '+progress.value+'%';
+    });
+
+    ffmpeg.on('log',({message})=>{
+      if(message) console.log(message);
+    });
+
+    const toBlobURL=async(url,type)=>{
+      const response=await fetch(url);
+      if(!response.ok) throw new Error('Engine file load failed: '+url);
+      const blob=await response.blob();
+      return URL.createObjectURL(new Blob([blob],{type}));
+    };
+
+    const coreURL=await toBlobURL(coreBase+'/ffmpeg-core.js','text/javascript');
+    const wasmURL=await toBlobURL(coreBase+'/ffmpeg-core.wasm','application/wasm');
+
+    await ffmpeg.load({coreURL,wasmURL});
+  }
+
+  convertBtn.addEventListener('click',async()=>{
+    if(!selectedFile) return;
+
+    convertBtn.disabled=true;
+    download.style.display='none';
+    progress.value=0;
+
+    let inputName='input_video';
+    let outputName='output_audio.mp3';
+
+    try{
+      await loadEngine();
+      status.textContent='Video तैयार हो रहा है...';
+
+      const data=new Uint8Array(await selectedFile.arrayBuffer());
+      await ffmpeg.writeFile(inputName,data);
+
+      status.textContent='MP3 में Convert हो रहा है...';
+
+      await ffmpeg.exec([
+        '-i',inputName,
+        '-vn',
+        '-codec:a','libmp3lame',
+        '-q:a','2',
+        outputName
+      ]);
+
+      const result=await ffmpeg.readFile(outputName);
+      const blob=new Blob([result],{type:'audio/mpeg'});
+
+      if(outputURL) URL.revokeObjectURL(outputURL);
+      outputURL=URL.createObjectURL(blob);
+
+      download.href=outputURL;
+      download.download=selectedFile.name.replace(/\.[^.]+$/,'')+'.mp3';
+      download.style.display='inline-block';
+      status.textContent='✅ Conversion पूरा हुआ! MP3 डाउनलोड करें।';
+      progress.value=100;
+
+      await ffmpeg.deleteFile(inputName);
+      await ffmpeg.deleteFile(outputName);
+    }catch(error){
+      console.error(error);
+      status.textContent='Error: '+(error.message||'Conversion नहीं हो पाया। छोटी MP4 फाइल से दोबारा कोशिश करें।');
+    }finally{
+      convertBtn.disabled=!selectedFile;
+    }
+  });
+})();
+</script>
+</body>
+</html>
